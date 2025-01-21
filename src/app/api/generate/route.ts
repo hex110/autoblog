@@ -1,35 +1,46 @@
 import { generate, isErrorResponse } from "@/utils/llmClient";
+import { UserPreferences } from "@/types/personalization";
 
 export async function POST(request: Request) {
-  const { markdown, selectedOptions, customPrompt } = await request.json();
+  const { markdown, preferences } = await request.json();
   
-  // Parse the custom prompt into sections if it contains our structured format
-  const preferences: Record<string, string> = {};
-  if (customPrompt) {
-    customPrompt.split('\n').forEach((line: string) => {
-      const [key, value] = line.split(': ');
-      if (key && value) {
-        preferences[key.toLowerCase()] = value;
-      }
-    });
-  }
-
   const fullPrompt = `You will receive a markdown file, and you will modify it based on the user's preferences and requirements:
 
 USER PREFERENCES:
-${Object.entries(preferences).map(([key, value]) => `- ${key}: ${value}`).join('\n')}
-${selectedOptions.length > 0 ? `- Additional preferences: ${selectedOptions.join(', ')}` : ''}
-${customPrompt && !customPrompt.includes(': ') ? `- Custom instructions: ${customPrompt}` : ''}
+${preferences.content_preferences ? `Content Style:
+- Style: ${preferences.content_preferences.content_style || 'default'}
+- Tone: ${preferences.content_preferences.tone || 'default'}
+- Language: ${preferences.content_preferences.language || 'default'}
+- Emphasis: ${preferences.content_preferences.emphasis || 'default'}` : ''}
+
+${preferences.visual_preferences ? `Visual Style:
+- Emoji Usage: ${preferences.visual_preferences.emoji_usage || 'default'}
+- Spacing: ${preferences.visual_preferences.spacing || 'default'}
+- Layout: ${preferences.visual_preferences.layout || 'default'}` : ''}
+
+${preferences.reasoning?.main_points ? `Key Points:
+${preferences.reasoning.main_points.map((point: string) => `- ${point}`).join('\n')}` : ''}
+
+${preferences.reasoning?.additional_notes ? `Additional Notes:
+${Object.entries(preferences.reasoning.additional_notes)
+  .map(([key, value]) => `- ${key}: ${value}`)
+  .join('\n')}` : ''}
+
+${preferences.selectedOptions?.length ? `Additional Preferences:
+${preferences.selectedOptions.map((opt: string) => `- ${opt}`).join('\n')}` : ''}
+
+${preferences.customPrompt ? `Custom Instructions:
+${preferences.customPrompt}` : ''}
 
 MODIFICATION RULES:
 1. Content Style:
    - Follow the user's content style and tone preferences exactly
-   - Use specified emphasis techniques (emojis, capitalization, etc.) as requested
+   - Use specified emphasis techniques and language style
    - Maintain the specified level of formality/informality
    
 2. Visual Formatting:
-   - Follow the user's spacing preferences
-   - Use the requested markdown formatting style
+   - Follow the user's spacing and layout preferences
+   - Use emojis according to specified preference
    - Preserve the overall document structure unless big changes are requested
 
 3. Content Preservation:

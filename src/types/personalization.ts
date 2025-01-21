@@ -30,21 +30,50 @@ export interface PersonalizationApiRequest {
   };
 }
 
+export interface ContentPreferences {
+  content_style?: string;
+  tone?: string;
+  language?: string;
+  emphasis?: string;
+}
+
+export interface VisualPreferences {
+  emoji_usage?: string;
+  spacing?: string;
+  layout?: string;
+}
+
+export interface Reasoning {
+  main_points: string[];
+  trait_based: Record<string, string>;
+  pattern_based: Record<string, string>;
+  additional_notes: {
+    overall_style?: string;
+    content_focus?: string;
+    layout_focus?: string;
+    [key: string]: string | undefined;
+  };
+}
+
+export interface UserPreferences {
+  selectedOptions?: string[];
+  customPrompt?: string;
+  userDescription?: string;
+  content_preferences?: ContentPreferences;
+  visual_preferences?: VisualPreferences;
+  reasoning?: Reasoning;
+}
+
 export interface PersonalizationApiResponse {
   status: 'success' | 'error';
   service_type: string;
   recommendations: {
-    selectedOptions: string[];
-    customPrompt: string;
-    userDescription: string;
+    content_preferences?: ContentPreferences;
+    visual_preferences?: VisualPreferences;
   };
-  reasoning: {
-    main_points: string[];
-    trait_based: Record<string, string>;
-    pattern_based: Record<string, string>;
-    additional_notes: Record<string, any>;
-  };
+  reasoning: Reasoning;
   metadata: {
+    request_type: string;
     processed_at: string;
     version: string;
   };

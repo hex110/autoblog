@@ -28,3 +28,15 @@ export function cachePage(cacheKey: string, content: string): CachedPage {
   localStorage.setItem(cacheKey, JSON.stringify(cacheObject));
   return cacheObject;
 }
+
+export function clearPageCache() {
+  // Get all keys from localStorage
+  const keys = Object.keys(localStorage);
+  
+  // Remove all items that look like page cache entries (contain an underscore)
+  keys.forEach(key => {
+    if (key.includes('_')) {
+      localStorage.removeItem(key);
+    }
+  });
+}

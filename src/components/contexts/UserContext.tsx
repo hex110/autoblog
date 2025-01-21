@@ -2,17 +2,19 @@
 
 import React, { createContext, useState, ReactNode, useEffect } from 'react';
 import { fetchUserDescription, fetchPersonalizationFromApi } from '@/utils/aiApiConnector';
+import { clearPageCache } from '@/utils/pageCache';
+import { UserPreferences, ContentPreferences, VisualPreferences, Reasoning } from '@/types/personalization';
 
 interface UserContextProps {
-  customPrompt: string;
   userDescription: string;
-  selectedOptions: string[];
   userHasWishes: boolean;
   isLoading: boolean;
   error: string | null;
+  preferences: UserPreferences;
   updateUserWishes: (newOptions: string[], newCustomPrompt: string) => Promise<void>;
   resetPersonalization: () => void;
   fetchPersonalization: () => Promise<void>;
+  startPersonalization: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextProps | undefined>(undefined);
@@ -22,8 +24,7 @@ interface UserProviderProps {
 }
 
 export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
-  const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
-  const [customPrompt, setCustomPrompt] = useState<string>('');
+  const [preferences, setPreferences] = useState<UserPreferences>({});
   const [userDescription, setUserDescription] = useState<string>('');
   const [userHasWishes, setUserHasWishes] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -32,56 +33,39 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   // Load saved preferences from localStorage
   useEffect(() => {
     try {
-      const options = localStorage.getItem('selectedOptions');
-      const prompt = localStorage.getItem('prompt') || '';
-      const description = localStorage.getItem('userDescription') || '';
-      setSelectedOptions(options ? JSON.parse(options) : []);
-      setCustomPrompt(prompt);
-      setUserDescription(description);
+      const savedPrefs = localStorage.getItem('userPreferences');
+      if (savedPrefs) {
+        const prefs: UserPreferences = JSON.parse(savedPrefs);
+        setPreferences(prefs);
+        setUserDescription(prefs.userDescription || '');
+        setUserHasWishes(true); // If we have saved preferences, we have wishes
+      }
     } catch (error) {
       console.error('Error loading preferences from localStorage:', error);
-      // Reset to defaults if there's an error
-      setSelectedOptions([]);
-      setCustomPrompt('');
-      setUserDescription('');
+      resetPersonalization();
     }
   }, []);
 
-  // Update userHasWishes when preferences change
-  useEffect(() => {
-    const hasOptions = Array.isArray(selectedOptions) && selectedOptions.length > 0;
-    const hasPrompt = typeof customPrompt === 'string' && customPrompt !== '';
-    setUserHasWishes(hasOptions || hasPrompt);
-  }, [selectedOptions, customPrompt]);
-
-  const saveToLocalStorage = (options: string[], prompt: string, description: string) => {
+  const saveToLocalStorage = (prefs: UserPreferences) => {
     try {
-      localStorage.setItem('selectedOptions', JSON.stringify(options));
-      localStorage.setItem('prompt', prompt);
-      localStorage.setItem('userDescription', description);
+      localStorage.setItem('userPreferences', JSON.stringify(prefs));
     } catch (error) {
       console.error('Error saving to localStorage:', error);
     }
   };
 
-  const optionsChanged = (newOptions: string[] = [], oldOptions: string[] = []): boolean => {
-    return JSON.stringify(newOptions) !== JSON.stringify(oldOptions);
-  }
-
   const resetPersonalization = () => {
-    setSelectedOptions([]);
-    setCustomPrompt('');
+    setPreferences({});
     setUserDescription('');
     setUserHasWishes(false);
     setError(null);
     setIsLoading(false);
     
     try {
-      localStorage.removeItem('selectedOptions');
-      localStorage.removeItem('prompt');
-      localStorage.removeItem('userDescription');
+      localStorage.removeItem('userPreferences');
+      clearPageCache();
     } catch (error) {
-      console.error('Error clearing localStorage:', error);
+      console.error('Error clearing data:', error);
     }
   };
 
@@ -90,24 +74,36 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
 
     setIsLoading(true);
     setError(null);
-    setUserDescription('loading...');
 
     try {
-      const data = await fetchPersonalizationFromApi(selectedOptions, customPrompt);
-      const { selectedOptions: newOptions, customPrompt: newPrompt, userDescription: newDescription } = data.recommendations;
+      const data = await fetchPersonalizationFromApi(
+        preferences.selectedOptions || [], 
+        preferences.customPrompt || ''
+      );
       
-      // Update all states at once
-      setSelectedOptions(newOptions || []);
-      setCustomPrompt(newPrompt || '');
-      setUserDescription(newDescription || '');
-      setUserHasWishes(true); // If we got a response, we definitely have wishes now
+      // Create new preferences object with full API response
+      const newPrefs: UserPreferences = {
+        // Keep manual preferences
+        selectedOptions: preferences.selectedOptions || [],
+        customPrompt: preferences.customPrompt || '',
+        // Add API response data
+        content_preferences: data.recommendations.content_preferences,
+        visual_preferences: data.recommendations.visual_preferences,
+        reasoning: data.reasoning,
+        // Set user description from content style or fallback
+        userDescription: data.recommendations.content_preferences?.content_style || 'Customized reader'
+      };
+
+      // Update all states
+      setPreferences(newPrefs);
+      setUserDescription(newPrefs.userDescription || '');
+      setUserHasWishes(true);
       
-      // Save everything to localStorage
-      saveToLocalStorage(newOptions, newPrompt, newDescription);
+      // Save to localStorage
+      saveToLocalStorage(newPrefs);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch personalization');
       console.error('Error fetching personalization:', err);
-      setUserDescription('(error)');
     } finally {
       setIsLoading(false);
     }
@@ -116,46 +112,66 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   const updateUserWishes = async (newOptions: string[] = [], newCustomPrompt: string = '') => {
     if (isLoading) return;
 
-    let changed = false;
-    if (optionsChanged(newOptions, selectedOptions)) {
-      setSelectedOptions(newOptions);
-      changed = true;
-    }
-    if (newCustomPrompt !== customPrompt) {
-      setCustomPrompt(newCustomPrompt);
-      changed = true;
-    }
+    setIsLoading(true);
+    setError(null);
 
-    if (changed) {
-      setIsLoading(true);
-      setError(null);
-      setUserDescription('loading...');
+    try {
+      const response = await fetchUserDescription(newOptions, newCustomPrompt);
       
-      try {
-        const response = await fetchUserDescription(newOptions, newCustomPrompt);
-        setUserDescription(response.text || '');
-        saveToLocalStorage(newOptions, newCustomPrompt, response.text);
-      } catch (err) {
-        console.error('Error fetching user description:', err);
-        setUserDescription('(error)');
-        setError(err instanceof Error ? err.message : 'Failed to fetch user description');
-      } finally {
-        setIsLoading(false);
-      }
+      // Create new preferences object
+      const newPrefs: UserPreferences = {
+        // Keep existing API-provided preferences if they exist
+        content_preferences: preferences.content_preferences,
+        visual_preferences: preferences.visual_preferences,
+        reasoning: preferences.reasoning,
+        // Update manual preferences
+        selectedOptions: newOptions,
+        customPrompt: newCustomPrompt,
+        userDescription: response.text || ''
+      };
+
+      // Update all states
+      setPreferences(newPrefs);
+      setUserDescription(newPrefs.userDescription || '');
+      setUserHasWishes(true);
+      
+      // Save to localStorage
+      saveToLocalStorage(newPrefs);
+    } catch (err) {
+      console.error('Error updating user wishes:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update preferences');
+    } finally {
+      setIsLoading(false);
     }
-  }
+  };
+
+  const startPersonalization = async () => {
+    if (!userHasWishes || isLoading) return;
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      window.dispatchEvent(new Event('start-personalization'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start personalization');
+      console.error('Error starting personalization:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <UserContext.Provider value={{ 
-      customPrompt, 
-      userDescription, 
-      selectedOptions, 
-      userHasWishes, 
+      userDescription,
+      userHasWishes,
       isLoading,
       error,
+      preferences,
       updateUserWishes,
       resetPersonalization,
-      fetchPersonalization
+      fetchPersonalization,
+      startPersonalization
     }}>
       {children}
     </UserContext.Provider>

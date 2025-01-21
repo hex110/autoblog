@@ -18,14 +18,31 @@ interface PersonalizedPostProps {
 
 export function PersonalizedPost({ markdown, slug }: PersonalizedPostProps) {
   const [modifiedContent, setModifiedContent] = useState('');
-  const { selectedOptions, customPrompt, userHasWishes } = useUserContext();
+  const { preferences, userHasWishes } = useUserContext();
   const [cachedPage, setCachedPage] = useState<CachedPage | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [shouldGenerate, setShouldGenerate] = useState(false);
+
+  // Create a stable cache key from preferences
+  const createCacheKey = () => {
+    const parts = [
+      slug,
+      preferences.content_preferences?.content_style,
+      preferences.content_preferences?.tone,
+      preferences.visual_preferences?.emoji_usage,
+      preferences.visual_preferences?.spacing,
+      preferences.selectedOptions?.join('_'),
+      preferences.customPrompt
+    ].filter(Boolean);
+    return parts.join('_');
+  };
 
   const generatePersonalizedContent = () => {
+    if (!userHasWishes) return;
+    
     setIsGenerating(true);
-    const cacheKey = `${slug}_${selectedOptions.join('_')}_${customPrompt}`;
-    fetchModifiedMarkdown(markdown, selectedOptions, customPrompt)
+    const cacheKey = createCacheKey();
+    fetchModifiedMarkdown(markdown, preferences)
       .then(response => {
         const newCachedPage = cachePage(cacheKey, response.text);
         setCachedPage(newCachedPage);
@@ -38,52 +55,69 @@ export function PersonalizedPost({ markdown, slug }: PersonalizedPostProps) {
       })
       .finally(() => {
         setIsGenerating(false);
+        setShouldGenerate(false);
       });
   }
 
+  // Check cache when preferences change
   useEffect(() => {
     if (slug && markdown && userHasWishes) {
-      const cacheKey = `${slug}_${selectedOptions.join('_')}_${customPrompt}`;
+      const cacheKey = createCacheKey();
       const cached = getCachedPage(cacheKey);
 
       if (cached) {
         setCachedPage(cached);
         setModifiedContent(cached.content);
-        return;
+      } else if (shouldGenerate) {
+        generatePersonalizedContent();
       }
-
-      generatePersonalizedContent();
     } else {
-      setCachedPage(null)
+      setCachedPage(null);
       setModifiedContent('');
     }
-  }, [markdown, selectedOptions, customPrompt, slug, setCachedPage, setModifiedContent, userHasWishes]);
+  }, [markdown, preferences, slug, shouldGenerate, userHasWishes]);
+
+  // Listen for personalization requests
+  useEffect(() => {
+    const handlePersonalization = () => {
+      setShouldGenerate(true);
+    };
+
+    window.addEventListener('start-personalization', handlePersonalization);
+    return () => window.removeEventListener('start-personalization', handlePersonalization);
+  }, []);
 
   return (
     <>
       <AiDisclaimer />
       <div className="text-sm text-gray-500 flex items-center gap-2 mt-6 h-6">
-        <span>
-          Generated on {new Intl.DateTimeFormat('en-US', {
-            dateStyle: 'medium',
-            timeStyle: 'short'
-          }).format(new Date(cachedPage?.timestamp ?? Date.now()))}
-        </span>
-        <button
-          onClick={generatePersonalizedContent}
-          className="p-1 hover:bg-gray-100 rounded-full transition-colors"
-          title="Regenerate content"
-          disabled={isGenerating}
-        >
-          <BiRefresh className="w-4 h-4" />
-        </button>
+        {cachedPage && (
+          <>
+            <span>
+              Generated on {new Intl.DateTimeFormat('en-US', {
+                dateStyle: 'medium',
+                timeStyle: 'short'
+              }).format(new Date(cachedPage.timestamp))}
+            </span>
+            <button
+              onClick={() => setShouldGenerate(true)}
+              className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+              title="Regenerate content"
+              disabled={isGenerating}
+            >
+              <BiRefresh className="w-4 h-4" />
+            </button>
+          </>
+        )}
       </div>
       {isGenerating ? (
         <div className="text-center text-gray-500 mt-12">
           <span>Generating personalized version...</span>
         </div>
-      ) : (
+      ) : modifiedContent ? (
         <PostMarkdown markdownContent={modifiedContent} isModified={true} />
+      ) : (
+        <PostMarkdown markdownContent={markdown} isModified={false} />
       )}
     </>
   )

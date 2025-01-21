@@ -1,4 +1,4 @@
-import { PersonalizationApiRequest, PersonalizationApiResponse, createPersonalizationRequest } from '@/types/personalization';
+import { PersonalizationApiRequest, PersonalizationApiResponse, UserPreferences, createPersonalizationRequest } from '@/types/personalization';
 
 interface AIResponse {
   text: string;
@@ -30,14 +30,14 @@ export async function fetchUserDescription(selectedOptions: string[], customProm
   }
 }
 
-export async function fetchModifiedMarkdown(markdown: string, selectedOptions: string[], customPrompt: string): Promise<AIResponse> {
+export async function fetchModifiedMarkdown(markdown: string, preferences: UserPreferences): Promise<AIResponse> {
   try {
     const response = await fetch('/api/generate', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ markdown, selectedOptions, customPrompt }),
+      body: JSON.stringify({ markdown, preferences }),
     });
 
     if (!response.ok) {
@@ -73,30 +73,13 @@ export async function fetchPersonalizationFromApi(selectedOptions: string[], cus
 
     const data = await response.json();
     
-    // Transform the API response to match our expected format
+    // Create new preferences object with full API response
     return {
       status: data.status,
       service_type: data.service_type,
       recommendations: {
-        // Combine all preferences into a comprehensive list
-        selectedOptions: [
-          // Content preferences
-          data.recommendations.content_preferences.content_style,
-          data.recommendations.content_preferences.tone,
-          ...(data.recommendations.content_preferences.emphasis_techniques || []),
-          // Visual preferences
-          data.recommendations.visual_preferences.spacing,
-          data.recommendations.visual_preferences.formatting,
-        ].filter(Boolean),
-        // Create a detailed custom prompt that captures all preferences
-        customPrompt: [
-          `Content style: ${data.recommendations.content_preferences.content_style}`,
-          `Tone: ${data.recommendations.content_preferences.tone}`,
-          `Emphasis: ${data.recommendations.content_preferences.emphasis_techniques?.join(', ')}`,
-          `Spacing: ${data.recommendations.visual_preferences.spacing}`,
-          `Formatting: ${data.recommendations.visual_preferences.formatting}`,
-        ].filter(Boolean).join('\n'),
-        userDescription: data.recommendations.content_preferences.content_style || 'Customized reader'
+        content_preferences: data.recommendations.content_preferences,
+        visual_preferences: data.recommendations.visual_preferences,
       },
       reasoning: data.reasoning,
       metadata: data.metadata
