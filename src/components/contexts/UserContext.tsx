@@ -10,7 +10,7 @@ interface UserContextProps {
   userHasWishes: boolean;
   isLoading: boolean;
   error: string | null;
-  updateUserWishes: (newOptions: string[], newCustomPrompt: string) => void;
+  updateUserWishes: (newOptions: string[], newCustomPrompt: string) => Promise<void>;
   resetPersonalization: () => void;
   fetchPersonalization: () => Promise<void>;
 }
@@ -29,22 +29,43 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Load saved preferences from localStorage
   useEffect(() => {
-    const options = localStorage.getItem('selectedOptions') || '[]';
-    const prompt = localStorage.getItem('prompt') || '';
-    const description = localStorage.getItem('userDescription') || '';
-    setSelectedOptions(JSON.parse(options));
-    setCustomPrompt(prompt);
-    setUserDescription(description);
+    try {
+      const options = localStorage.getItem('selectedOptions');
+      const prompt = localStorage.getItem('prompt') || '';
+      const description = localStorage.getItem('userDescription') || '';
+      setSelectedOptions(options ? JSON.parse(options) : []);
+      setCustomPrompt(prompt);
+      setUserDescription(description);
+    } catch (error) {
+      console.error('Error loading preferences from localStorage:', error);
+      // Reset to defaults if there's an error
+      setSelectedOptions([]);
+      setCustomPrompt('');
+      setUserDescription('');
+    }
   }, []);
 
+  // Update userHasWishes when preferences change
   useEffect(() => {
-    setUserHasWishes(selectedOptions.length > 0 || customPrompt !== '');
+    const hasOptions = Array.isArray(selectedOptions) && selectedOptions.length > 0;
+    const hasPrompt = typeof customPrompt === 'string' && customPrompt !== '';
+    setUserHasWishes(hasOptions || hasPrompt);
   }, [selectedOptions, customPrompt]);
 
-  const optionsChanged = (newOptions: string[], oldOptions: string[]): boolean => {
-    const changed = JSON.stringify(newOptions) !== JSON.stringify(oldOptions);
-    return changed;
+  const saveToLocalStorage = (options: string[], prompt: string, description: string) => {
+    try {
+      localStorage.setItem('selectedOptions', JSON.stringify(options));
+      localStorage.setItem('prompt', prompt);
+      localStorage.setItem('userDescription', description);
+    } catch (error) {
+      console.error('Error saving to localStorage:', error);
+    }
+  };
+
+  const optionsChanged = (newOptions: string[] = [], oldOptions: string[] = []): boolean => {
+    return JSON.stringify(newOptions) !== JSON.stringify(oldOptions);
   }
 
   const resetPersonalization = () => {
@@ -53,10 +74,15 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
     setUserDescription('');
     setUserHasWishes(false);
     setError(null);
+    setIsLoading(false);
     
-    localStorage.removeItem('selectedOptions');
-    localStorage.removeItem('prompt');
-    localStorage.removeItem('userDescription');
+    try {
+      localStorage.removeItem('selectedOptions');
+      localStorage.removeItem('prompt');
+      localStorage.removeItem('userDescription');
+    } catch (error) {
+      console.error('Error clearing localStorage:', error);
+    }
   };
 
   const fetchPersonalization = async () => {
@@ -64,63 +90,57 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
 
     setIsLoading(true);
     setError(null);
+    setUserDescription('loading...');
 
     try {
       const data = await fetchPersonalizationFromApi(selectedOptions, customPrompt);
       const { selectedOptions: newOptions, customPrompt: newPrompt, userDescription: newDescription } = data.recommendations;
       
-      setSelectedOptions(newOptions);
-      setCustomPrompt(newPrompt);
-      setUserDescription(newDescription);
-      setUserHasWishes(newOptions.length > 0 || newPrompt !== '');
-
-      // Update localStorage
-      localStorage.setItem('selectedOptions', JSON.stringify(newOptions));
-      localStorage.setItem('prompt', newPrompt);
-      localStorage.setItem('userDescription', newDescription);
+      // Update all states at once
+      setSelectedOptions(newOptions || []);
+      setCustomPrompt(newPrompt || '');
+      setUserDescription(newDescription || '');
+      setUserHasWishes(true); // If we got a response, we definitely have wishes now
+      
+      // Save everything to localStorage
+      saveToLocalStorage(newOptions, newPrompt, newDescription);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch personalization');
       console.error('Error fetching personalization:', err);
+      setUserDescription('(error)');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const updateUserWishes = async (newOptions: string[], newCustomPrompt: string) => {
+  const updateUserWishes = async (newOptions: string[] = [], newCustomPrompt: string = '') => {
     if (isLoading) return;
 
     let changed = false;
     if (optionsChanged(newOptions, selectedOptions)) {
       setSelectedOptions(newOptions);
-      localStorage.setItem('selectedOptions', JSON.stringify(newOptions));
       changed = true;
     }
     if (newCustomPrompt !== customPrompt) {
       setCustomPrompt(newCustomPrompt);
-      localStorage.setItem('prompt', newCustomPrompt);
       changed = true;
     }
 
     if (changed) {
-      if (newOptions.length > 0 || newCustomPrompt) {
-        setIsLoading(true);
-        setError(null);
-        setUserDescription('loading...');
-        
-        try {
-          const response = await fetchUserDescription(newOptions, newCustomPrompt);
-          setUserDescription(response.text);
-          localStorage.setItem('userDescription', response.text);
-        } catch (err) {
-          console.error('Error fetching user description:', err);
-          setUserDescription('(error)');
-          setError(err instanceof Error ? err.message : 'Failed to fetch user description');
-        } finally {
-          setIsLoading(false);
-        }
-      } else {
-        setUserDescription('');
-        localStorage.removeItem('userDescription');
+      setIsLoading(true);
+      setError(null);
+      setUserDescription('loading...');
+      
+      try {
+        const response = await fetchUserDescription(newOptions, newCustomPrompt);
+        setUserDescription(response.text || '');
+        saveToLocalStorage(newOptions, newCustomPrompt, response.text);
+      } catch (err) {
+        console.error('Error fetching user description:', err);
+        setUserDescription('(error)');
+        setError(err instanceof Error ? err.message : 'Failed to fetch user description');
+      } finally {
+        setIsLoading(false);
       }
     }
   }

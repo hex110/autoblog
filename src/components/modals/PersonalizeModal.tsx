@@ -12,20 +12,26 @@ interface PersonalizeModalProps {
 }
 
 export default function PersonalizeModal({ isOpen, onClose }: PersonalizeModalProps) {
-  const { selectedOptions, customPrompt, updateUserWishes } = useUserContext();
-  const [localSelectedOptions, setLocalSelectedOptions] = useState<string[]>(selectedOptions);
+  const { selectedOptions, customPrompt, updateUserWishes, isLoading } = useUserContext();
+  const [localSelectedOptions, setLocalSelectedOptions] = useState<string[]>([]);
+  const [localCustomPrompt, setLocalCustomPrompt] = useState('');
 
+  // Initialize local state when modal opens or global state changes
   useEffect(() => {
-    setLocalSelectedOptions(selectedOptions);
-  }, [selectedOptions]);
+    if (isOpen) {
+      setLocalSelectedOptions(selectedOptions || []);
+      setLocalCustomPrompt(customPrompt || '');
+    }
+  }, [isOpen, selectedOptions, customPrompt]);
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
-    const customPrompt = formData.get('background') as string;
-    updateUserWishes(localSelectedOptions, customPrompt);
+    const newCustomPrompt = formData.get('background') as string || '';
+    await updateUserWishes(localSelectedOptions, newCustomPrompt);
     onClose();
   };
+
   const toggleOption = (option: string) => {
     setLocalSelectedOptions(prev =>
       prev.includes(option)
@@ -49,10 +55,11 @@ export default function PersonalizeModal({ isOpen, onClose }: PersonalizeModalPr
               key={option}
               type="button"
               onClick={() => toggleOption(option)}
-              className={`${localSelectedOptions.includes(option)
+              className={`${(localSelectedOptions || []).includes(option)
                 ? 'btn-primary text-xs px-2 py-1'
                 : 'btn-secondary text-xs px-2 py-1'
                 }`}
+              disabled={isLoading}
             >
               {option}
             </button>
@@ -62,18 +69,25 @@ export default function PersonalizeModal({ isOpen, onClose }: PersonalizeModalPr
           name="background"
           className="w-full p-3 border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all bg-white text-sm"
           placeholder="Additional wishes, e.g. 'translate to Finnish', 'use very simple language', 'explain all jargon carefully'"
-          defaultValue={customPrompt}
+          value={localCustomPrompt}
+          onChange={(e) => setLocalCustomPrompt(e.target.value)}
+          disabled={isLoading}
         />
         <div className="flex justify-end gap-3 mt-4">
           <button
             type="button"
             onClick={onClose}
             className="btn-secondary"
+            disabled={isLoading}
           >
             Cancel
           </button>
-          <button type="submit" className="btn-primary">
-            Save
+          <button 
+            type="submit" 
+            className="btn-primary"
+            disabled={isLoading}
+          >
+            {isLoading ? 'Saving...' : 'Save'}
           </button>
         </div>
       </form>
