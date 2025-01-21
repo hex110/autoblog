@@ -1,15 +1,18 @@
 'use client';
 
 import React, { createContext, useState, ReactNode, useEffect } from 'react';
-import { fetchUserDescription } from '@/utils/aiApiConnector';
-
+import { fetchUserDescription, fetchPersonalizationFromApi } from '@/utils/aiApiConnector';
 
 interface UserContextProps {
   customPrompt: string;
   userDescription: string;
   selectedOptions: string[];
   userHasWishes: boolean;
+  isLoading: boolean;
+  error: string | null;
   updateUserWishes: (newOptions: string[], newCustomPrompt: string) => void;
+  resetPersonalization: () => void;
+  fetchPersonalization: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextProps | undefined>(undefined);
@@ -23,6 +26,8 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [userDescription, setUserDescription] = useState<string>('');
   const [userHasWishes, setUserHasWishes] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const options = localStorage.getItem('selectedOptions') || '[]';
@@ -42,7 +47,48 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
     return changed;
   }
 
-  const updateUserWishes = (newOptions: string[], newCustomPrompt: string) => {
+  const resetPersonalization = () => {
+    setSelectedOptions([]);
+    setCustomPrompt('');
+    setUserDescription('');
+    setUserHasWishes(false);
+    setError(null);
+    
+    localStorage.removeItem('selectedOptions');
+    localStorage.removeItem('prompt');
+    localStorage.removeItem('userDescription');
+  };
+
+  const fetchPersonalization = async () => {
+    if (isLoading) return;
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const data = await fetchPersonalizationFromApi(selectedOptions, customPrompt);
+      const { selectedOptions: newOptions, customPrompt: newPrompt, userDescription: newDescription } = data.recommendations;
+      
+      setSelectedOptions(newOptions);
+      setCustomPrompt(newPrompt);
+      setUserDescription(newDescription);
+      setUserHasWishes(newOptions.length > 0 || newPrompt !== '');
+
+      // Update localStorage
+      localStorage.setItem('selectedOptions', JSON.stringify(newOptions));
+      localStorage.setItem('prompt', newPrompt);
+      localStorage.setItem('userDescription', newDescription);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch personalization');
+      console.error('Error fetching personalization:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const updateUserWishes = async (newOptions: string[], newCustomPrompt: string) => {
+    if (isLoading) return;
+
     let changed = false;
     if (optionsChanged(newOptions, selectedOptions)) {
       setSelectedOptions(newOptions);
@@ -54,17 +100,24 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
       localStorage.setItem('prompt', newCustomPrompt);
       changed = true;
     }
+
     if (changed) {
       if (newOptions.length > 0 || newCustomPrompt) {
-        console.log(newOptions, newCustomPrompt)
+        setIsLoading(true);
+        setError(null);
         setUserDescription('loading...');
-        fetchUserDescription(newOptions, newCustomPrompt).then(response => {
+        
+        try {
+          const response = await fetchUserDescription(newOptions, newCustomPrompt);
           setUserDescription(response.text);
           localStorage.setItem('userDescription', response.text);
-        }).catch(error => {
-          console.error('Error fetching user description:', error);
+        } catch (err) {
+          console.error('Error fetching user description:', err);
           setUserDescription('(error)');
-        });
+          setError(err instanceof Error ? err.message : 'Failed to fetch user description');
+        } finally {
+          setIsLoading(false);
+        }
       } else {
         setUserDescription('');
         localStorage.removeItem('userDescription');
@@ -73,7 +126,17 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   }
 
   return (
-    <UserContext.Provider value={{ customPrompt, userDescription, selectedOptions, userHasWishes, updateUserWishes }}>
+    <UserContext.Provider value={{ 
+      customPrompt, 
+      userDescription, 
+      selectedOptions, 
+      userHasWishes, 
+      isLoading,
+      error,
+      updateUserWishes,
+      resetPersonalization,
+      fetchPersonalization
+    }}>
       {children}
     </UserContext.Provider>
   );

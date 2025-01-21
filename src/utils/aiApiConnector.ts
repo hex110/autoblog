@@ -1,4 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk";
+import { PersonalizationApiRequest, PersonalizationApiResponse, createPersonalizationRequest } from '@/types/personalization';
 
 
 interface AIResponse {
@@ -47,4 +48,28 @@ export async function fetchModifiedMarkdown(markdown: string, selectedOptions: s
     console.error('Error fetching modified markdown:', error);
     return { text: markdown };
   }
+}
+
+export async function fetchPersonalizationFromApi(selectedOptions: string[], customPrompt: string): Promise<PersonalizationApiResponse> {
+  const request = createPersonalizationRequest(selectedOptions, customPrompt);
+  
+  const response = await fetch('/api/personalize', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(`API request failed with status ${response.status}`);
+  }
+
+  const data: PersonalizationApiResponse = await response.json();
+  
+  if (data.status === 'error') {
+    throw new Error('API returned error status');
+  }
+
+  return data;
 }
